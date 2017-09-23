@@ -1,11 +1,12 @@
 // parameters needed for smolyak_kernel.cu: D, L, M, N, SMAX, MU_MAX
 // INPUTS:
 // x - matrix of size L x D
-// xm, xs - vectors of length D
 // s - matrix of size M x MU_MAX in constant memory
 // c - matrix of size M x N
 // OUTPUT:
 // y - matrix of size L x N
+
+__constant__ double xm[D], xs[D];
 
 #if MU_MAX*M<=65536
 #define CONST_S
@@ -18,11 +19,11 @@ __constant__ unsigned char s[MU_MAX][M];
 //#endif
 
 #ifdef CONST_S
-__global__ void smolyak(double const * __restrict__ x, double const xm[D], double const xs[D], double *y, double const * __restrict__ c) {
+__global__ void smolyak(double const * __restrict__ x, double *y, double const * __restrict__ c) {
 #elif defined CONST_C
-__global__ void smolyak(double const * __restrict__ x, double const xm[D], double const xs[D], double *y) {
+__global__ void smolyak(double const * __restrict__ x, double *y) {
 #else
-__global__ void smolyak(double const * __restrict__ x, double const xm[D], double const xs[D], double *y, double const * __restrict__ c, unsigned char const * __restrict__ s) {
+__global__ void smolyak(double const * __restrict__ x, double *y, double const * __restrict__ c, unsigned char const * __restrict__ s) {
 #endif
 
 	// Two options for thread-private storage p:

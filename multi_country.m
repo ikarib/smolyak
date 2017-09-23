@@ -10,7 +10,7 @@ delta = 0.025;  % Depreciation rate
 rho   = 0.95;   % Persistence of the log of the productivity level
 Sigma = 0.01^2*(eye(N)+ones(N)); % Covariance matrix of shocks to the log of the productivity level
 A=(1/beta-1+delta)/alpha; D=2*N;
-mu = repmat(2,1,D); % States: k[1..N], a[1..N]
+mu = [repmat(3,1,N) repmat(2,1,N)]; % States: k[1..N], a[1..N]
 if any(size(mu)~=[1,D]); error('mu must be a row vector of length %d',D); end
 gssa=false; % use initial guess from GSSA
 if gssa
@@ -44,12 +44,18 @@ ap=reshape(bsxfun(@times,repmat(a.^rho,1,J),e(:)'),M,N,J);
 x=[nan(L,N) reshape(permute(ap,[1 3 2]),L,N)];
 
 if gpu
-    if system(sprintf('nvcc -ptx smolyak_kernel.cu -DD=%d -DL=%d -DM=%d -DN=%d -DSMAX=%d -DMU_MAX=%d',D,L,M,N,2^max(mu),max(mu))); error('nvcc failed'); end
+    gd = gpuDevice;
+%     if system(sprintf('nvcc -arch=sm_35 -ptx smolyak_kernel.cu -DD=%d -DL=%d -DM=%d -DN=%d -DSMAX=%d -DMU_MAX=%d',D,L,M,N,2^max(mu),max(mu))); error('nvcc failed'); end
     kernel = parallel.gpu.CUDAKernel('smolyak_kernel.ptx', 'smolyak_kernel.cu');
     kernel.ThreadBlockSize = 128;
     kernel.GridSize = ceil(L/kernel.ThreadBlockSize(1));
+    setConstantMemory(kernel,'xm',xm);
+    setConstantMemory(kernel,'xs',xs);
     setConstantMemory(kernel,'s',uint8(S-1));
     kpp_=nan(L,N,'gpuArray');
+    x=gpuArray(x);
+    xm=gpuArray(xm);
+    xs=gpuArray(xs);
 else
     kpp=ones(M,N,J);
 end
@@ -76,6 +82,13 @@ end
 if gpu
     B_inv=gpuArray(B_inv);
     b=gpuArray(b);
+    % Measure the overhead introduced by calling the wait function.
+    tover = inf;
+    for itr = 1:100
+        tic;
+        wait(gd);
+        tover = min(toc, tover);
+    end
 end
 t1=0;
 t3=0;
@@ -86,8 +99,10 @@ for it=1:max_iter
     if gpu
         x(:,1:N)=repmat(kp,J,1);
 t0=tic;
-        kpp = gather(feval(kernel, x, xm, xs, kpp_, b)); 
-t1=t1+toc(t0);
+        kpp_ = feval(kernel, x, kpp_, b);
+        wait(gd);
+t1=t1+toc(t0)-tover;
+        kpp = gather(kpp_);
 %         max(max(abs(kpp - smolyak(mu,xm,xs,S,x)*b)))
         kpp=permute(reshape(kpp,M,J,N),[1 3 2]);
     else
@@ -119,6 +134,7 @@ if gpu; b=gather(b); end
 save(bfile,'b')
 
 %% compute Euler equation errors
+gpu=false;
 tic
 T_test=10200; discard=200; Omega=chol(Sigma);
 if gssa
@@ -140,14 +156,16 @@ ap=reshape(bsxfun(@times,repmat(a.^rho,1,J),e(:)'),T,N,J);
 apn=reshape(permute(ap,[1 3 2]),T*J,N);
 uc=mean(A*a.*k.^alpha+(1-delta)*k-kp,2).^-gam;
 if gpu
-    if system(sprintf('nvcc -ptx smolyak_kernel.cu -DD=%d -DL=%d -DM=%d -DN=%d -DSMAX=%d -DMU_MAX=%d',D,T*J,M,N,2^max(mu),max(mu))); error('nvcc failed'); end
+%     if system(sprintf('nvcc -arch=sm_35 -ptx smolyak_kernel.cu -DD=%d -DL=%d -DM=%d -DN=%d -DSMAX=%d -DMU_MAX=%d',D,T*J,M,N,2^max(mu),max(mu))); error('nvcc failed'); end
     kernel = parallel.gpu.CUDAKernel('smolyak_kernel.ptx', 'smolyak_kernel.cu');
     kernel.ThreadBlockSize = 128;
     kernel.GridSize = ceil(T*J/kernel.ThreadBlockSize(1));
+    setConstantMemory(kernel,'xm',xm);
+    setConstantMemory(kernel,'xs',xs);
     setConstantMemory(kernel,'s',uint8(S-1));
     x=[repmat(kp,J,1) apn];
     kpp=nan(T*J,N,'gpuArray');
-    kpp = gather(feval(kernel, x, xm, xs, kpp, b));
+    kpp = gather(feval(kernel, x, kpp, b));
     kpp=permute(reshape(kpp,T,J,N),[1 3 2]);
 else
     kpp=nan(T,N,J);
