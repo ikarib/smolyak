@@ -94,7 +94,7 @@ t0=0; % total runtime
 t1=0; % memcpy_in time
 t2=0; % kernel time
 t3=0; % memcpy_out time
-fprintf('Iter\tGFLOPS (%runtime)\tMemcpy_IN, MB/s (%runtime)\tMemcpy_OUT, MB/s (%runtime)\tRuntime\tDiff\n')
+fprintf('Iter\tGFLOPS\tMemcpy_IN, MB/s\tMemcpy_OUT, MB/s\tRuntime\tDiff\n')
 tic
 for it=1:max_iter
     if any(kp(:)<0); error('negative capital'); end
@@ -130,7 +130,7 @@ t2=t2+toc(tmp);
     if ~mod(it,disp_iter)
         dkp=mean(abs(1-y(:)));
         tmp=t0; t0=toc; tmp=t0-tmp; gflops=L*M*(2*N+max(mu)-1)/t2*disp_iter/1e9;
-        fprintf('%g\t%.1f (%.1f)\t%.1f (%.1f)\t%.1f (%.1f)\t%g\t%e\n',it,gflops,100*t2/tmp,L*N*8*disp_iter/t1/1024/1024,100*t1/tmp,L*N*8*disp_iter/t3/1024/1024,100*t3/tmp,6500/it*t0,dkp)
+        fprintf('%g\t%.1f (%.1f%%)\t%.1f (%.1f%%)\t%.1f (%.1f%%)\t%.1f\t%e\n',it,gflops,100*t2/tmp,L*N*8*disp_iter/t1/1024/1024,100*t1/tmp,L*N*8*disp_iter/t3/1024/1024,100*t3/tmp,6500/it*t0,dkp)
         t1=0; t2=0; t3=0;
         if dkp<1e-10; break; end
     end
