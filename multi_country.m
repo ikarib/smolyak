@@ -1,7 +1,7 @@
 % see MATLAB Tutorial on how to run CUDA or PTX Code on GPU:
 % http://www.mathworks.com/help/distcomp/run-cuda-or-ptx-code-on-gpu.html
 clear
-gpu = true; max_iter=10000; disp_iter=100;
+gpu = true; max_iter=100; disp_iter=1;
 N     = 10;      % Number of countries
 gam   = 1;      % Utility-function parameter
 alpha = 0.36;   % Capital share in output
@@ -90,22 +90,26 @@ if gpu
         tover = min(toc, tover);
     end
 end
-t1=0;
-t2=0;
-t3=0;
+t0=0; % total runtime
+t1=0; % memcpy_in time
+t2=0; % kernel time
+t3=0; % memcpy_out time
+fprintf('Iter\tGFLOPS (%runtime)\tMemcpy_IN, MB/s (%runtime)\tMemcpy_OUT, MB/s (%runtime)\tRuntime\tDiff\n')
 tic
 for it=1:max_iter
     if any(kp(:)<0); error('negative capital'); end
     if it==10; bdamp=0.1; end
     if gpu
+tmp=tic;
         x(:,1:N)=repmat(kp,J,1);
+t1=t1+toc(tmp);
 tmp=tic;
         kpp_ = feval(kernel, x, kpp_, b);
         wait(gd);
-t1=t1+toc(tmp)-tover;
+t2=t2+toc(tmp)-tover;
 tmp=tic;
         kpp = gather(kpp_);
-t2=t2+toc(tmp);
+t3=t3+toc(tmp);
 %         max(max(abs(kpp - smolyak(mu,xm,xs,S,x)*b)))
         kpp=permute(reshape(kpp,M,J,N),[1 3 2]);
     else
@@ -114,7 +118,7 @@ tmp=tic;
         for j=1:J
             kpp(:,:,j)=smolyak(mu,xm,xs,S,[kp ap(:,:,j)])*b;
         end
-t1=t1+toc(tmp);
+t2=t2+toc(tmp);
     end
     ucp=repmat(mean(bsxfun(@plus,bsxfun(@times,A*kp.^alpha,ap)-kpp,(1-delta)*kp),2).^-gam,1,N,1);
     r=1-delta+bsxfun(@times,(A*alpha)*kp.^(alpha-1),ap);
@@ -125,14 +129,15 @@ t1=t1+toc(tmp);
     b = B_inv*kp;
     if ~mod(it,disp_iter)
         dkp=mean(abs(1-y(:)));
-        tmp=t3; t3=toc; tmp=t3-tmp; gflops=L*M*(2*N+max(mu)-1)/t1*disp_iter/1e9;
-        fprintf('it=%g\tgflops=%f\tbandwidth=%f MB/s\tkernel_time=%f (%.1f%%)\trun_time=%g\tdiff=%e\n',it,gflops,L*N*8*disp_iter/t2/1024/1024,t1,100*t1/tmp,6500/it*t3,dkp)
-        t1=0; t2=0;
+        tmp=t0; t0=toc; tmp=t0-tmp; gflops=L*M*(2*N+max(mu)-1)/t2*disp_iter/1e9;
+        fprintf('%g\t%.1f (%.1f)\t%.1f (%.1f)\t%.1f (%.1f)\t%g\t%e\n',it,gflops,100*t2/tmp,L*N*8*disp_iter/t1/1024/1024,100*t1/tmp,L*N*8*disp_iter/t3/1024/1024,100*t3/tmp,6500/it*t0,dkp)
+        t1=0; t2=0; t3=0;
         if dkp<1e-10; break; end
     end
 end
 time_Smol = toc;
 fprintf('N = %d\tmu = %d\ttime = %f\n',N,mu(1),time_Smol)
+exit
 if gpu; b=gather(b); end
 save(bfile,'b')
 
