@@ -91,6 +91,7 @@ if gpu
     end
 end
 t1=0;
+t2=0;
 t3=0;
 tic
 for it=1:max_iter
@@ -98,20 +99,22 @@ for it=1:max_iter
     if it==10; bdamp=0.1; end
     if gpu
         x(:,1:N)=repmat(kp,J,1);
-t0=tic;
+tmp=tic;
         kpp_ = feval(kernel, x, kpp_, b);
         wait(gd);
-t1=t1+toc(t0)-tover;
+t1=t1+toc(tmp)-tover;
+tmp=tic;
         kpp = gather(kpp_);
+t2=t2+toc(tmp);
 %         max(max(abs(kpp - smolyak(mu,xm,xs,S,x)*b)))
         kpp=permute(reshape(kpp,M,J,N),[1 3 2]);
     else
         kpp=nan(M,N,J);
-t0=tic;
+tmp=tic;
         for j=1:J
             kpp(:,:,j)=smolyak(mu,xm,xs,S,[kp ap(:,:,j)])*b;
         end
-t1=t1+toc(t0);
+t1=t1+toc(tmp);
     end
     ucp=repmat(mean(bsxfun(@plus,bsxfun(@times,A*kp.^alpha,ap)-kpp,(1-delta)*kp),2).^-gam,1,N,1);
     r=1-delta+bsxfun(@times,(A*alpha)*kp.^(alpha-1),ap);
@@ -122,9 +125,9 @@ t1=t1+toc(t0);
     b = B_inv*kp;
     if ~mod(it,disp_iter)
         dkp=mean(abs(1-y(:)));
-        t2=t3; t3=toc; t2=t3-t2; gflops=L*M*(2*N+max(mu)-1)/t1*disp_iter/1e9;
-        fprintf('it=%g \t gflops=%f \t kernel_time=%f (%.1f%%) \t run_time=%g \t diff=%e\n',it,gflops,t1,100*t1/t2,6500/it*t3,dkp)
-        t1=0;
+        tmp=t3; t3=toc; tmp=t3-tmp; gflops=L*M*(2*N+max(mu)-1)/t1*disp_iter/1e9;
+        fprintf('it=%g\tgflops=%f\tbandwidth=%f MB/s\tkernel_time=%f (%.1f%%)\trun_time=%g\tdiff=%e\n',it,gflops,L*N*8*disp_iter/t2/1024/1024,t1,100*t1/tmp,6500/it*t3,dkp)
+        t1=0; t2=0;
         if dkp<1e-10; break; end
     end
 end
