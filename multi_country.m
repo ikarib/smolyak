@@ -1,7 +1,7 @@
 % see MATLAB Tutorial on how to run CUDA or PTX Code on GPU:
 % http://www.mathworks.com/help/distcomp/run-cuda-or-ptx-code-on-gpu.html
 clear
-gpu = true; max_iter=10000; disp_iter=100;
+gpu = true; max_iter=1000; disp_iter=10;
 N     = 10;      % Number of countries
 gam   = 1;      % Utility-function parameter
 alpha = 0.36;   % Capital share in output
@@ -44,18 +44,24 @@ ap=reshape(bsxfun(@times,repmat(a.^rho,1,J),e(:)'),M,N,J);
 x=[nan(L,N) reshape(permute(ap,[1 3 2]),L,N)];
 
 if gpu
-    gd = gpuDevice;
-%     if system(sprintf('nvcc -arch=sm_35 -ptx smolyak_kernel.cu -DD=%d -DL=%d -DM=%d -DN=%d -DSMAX=%d -DMU_MAX=%d',D,L,M,N,2^max(mu),max(mu))); error('nvcc failed'); end
-    kernel = parallel.gpu.CUDAKernel('smolyak_kernel.ptx', 'smolyak_kernel.cu');
-    kernel.ThreadBlockSize = 128;
-    kernel.GridSize = ceil(L/kernel.ThreadBlockSize(1));
-    setConstantMemory(kernel,'xm',xm);
-    setConstantMemory(kernel,'xs',xs);
-    setConstantMemory(kernel,'s',uint8(S-1));
-    kpp_=nan(L,N,'gpuArray');
-    x=gpuArray(x);
-    xm=gpuArray(xm);
-    xs=gpuArray(xs);
+    delete(gcp('nocreate'));
+    nGPUs = gpuDeviceCount;
+    myCluster = parcluster('local');
+    myCluster.NumWorkers = nGPUs;
+    saveProfile(myCluster);
+    parpool('local', nGPUs);
+    if system(sprintf('nvcc -arch=sm_35 -ptx smolyak_kernel.cu -DD=%d -DL=%d -DM=%d -DN=%d -DSMAX=%d -DMU_MAX=%d',D,L/nGPUs,M,N,2^max(mu),max(mu))); error('nvcc failed'); end
+    spmd
+        gd = gpuDevice;
+        kernel = parallel.gpu.CUDAKernel('smolyak_kernel.ptx', 'smolyak_kernel.cu');
+        kernel.ThreadBlockSize = 128;
+        kernel.GridSize = ceil(L/kernel.ThreadBlockSize(1));
+        setConstantMemory(kernel,'xm',xm);
+        setConstantMemory(kernel,'xs',xs);
+        setConstantMemory(kernel,'s',uint8(S-1));
+        kpp_=nan(L/nGPUs,N,'gpuArray');
+        x=gpuArray(x(1+L*(labindex-1)/nGPUs:L*labindex/nGPUs,:));
+    end
 else
     kpp=ones(M,N,J);
 end
@@ -80,41 +86,50 @@ else
     save(binvfile,'B_inv')
 end
 if gpu
-    B_inv=gpuArray(B_inv);
-    b=gpuArray(b);
-    % Measure the overhead introduced by calling the wait function.
-    tover = inf;
-    for itr = 1:100
-        tic;
-        wait(gd);
-        tover = min(toc, tover);
+    spmd
+        B_inv=gpuArray(B_inv);
+        b=gpuArray(b);
+        % Measure the overhead introduced by calling the wait function.
+        tover = inf;
+        for itr = 1:100
+            tic;
+            wait(gd);
+            tover = min(toc, tover);
+        end
     end
 end
-t1=0;
-t2=0;
-t3=0;
+t0=0; % total runtime
+t1=0; % memcopy_in time
+t2=0; % kernel time
+t3=0; % memcopy_out time
 tic
 for it=1:max_iter
     if any(kp(:)<0); error('negative capital'); end
     if it==10; bdamp=0.1; end
     if gpu
-        x(:,1:N)=repmat(kp,J,1);
+        spmd
 tmp=tic;
-        kpp_ = feval(kernel, x, kpp_, b);
-        wait(gd);
-t1=t1+toc(tmp)-tover;
+            x(:,1:N)=repmat(kp,J/nGPUs,1);
+t1=t1+toc(tmp);
 tmp=tic;
-        kpp = gather(kpp_);
-t2=t2+toc(tmp);
-%         max(max(abs(kpp - smolyak(mu,xm,xs,S,x)*b)))
+            kpp_ = feval(kernel, x, kpp_, b);
+            wait(gd);
+t2=t2+toc(tmp)-tover;
+tmp=tic;
+            kpp = gather(kpp_);
+t3=t3+toc(tmp);
+        end
+        kpp = vertcat(kpp{:});
+%         max(max(abs(kpp - smolyak(mu,xm,xs,S,gather(vertcat(x{:})))*gather(b{1}))))
         kpp=permute(reshape(kpp,M,J,N),[1 3 2]);
+        t1=t1{1};t2=t2{1};t3=t3{1};
     else
         kpp=nan(M,N,J);
 tmp=tic;
         for j=1:J
             kpp(:,:,j)=smolyak(mu,xm,xs,S,[kp ap(:,:,j)])*b;
         end
-t1=t1+toc(tmp);
+t2=t2+toc(tmp);
     end
     ucp=repmat(mean(bsxfun(@plus,bsxfun(@times,A*kp.^alpha,ap)-kpp,(1-delta)*kp),2).^-gam,1,N,1);
     r=1-delta+bsxfun(@times,(A*alpha)*kp.^(alpha-1),ap);
@@ -122,17 +137,24 @@ t1=t1+toc(tmp);
     uc=mean(A*a.*k.^alpha+(1-delta)*k-kp,2).^-gam;
     y=bsxfun(@rdivide,ucp,uc/(bdamp*beta))+(1-bdamp);
     kp = y.*kp;
-    b = B_inv*kp;
+    if gpu
+        spmd
+            b = B_inv*kp;
+        end
+    else
+        b = B_inv*kp;
+    end
     if ~mod(it,disp_iter)
         dkp=mean(abs(1-y(:)));
-        tmp=t3; t3=toc; tmp=t3-tmp; gflops=L*M*(2*N+max(mu)-1)/t1*disp_iter/1e9;
-        fprintf('it=%g\tgflops=%f\tbandwidth=%f MB/s\tkernel_time=%f (%.1f%%)\trun_time=%g\tdiff=%e\n',it,gflops,L*N*8*disp_iter/t2/1024/1024,t1,100*t1/tmp,6500/it*t3,dkp)
-        t1=0; t2=0;
+        tmp=t0; t0=toc; tmp=t0-tmp; gflops=L*M*(2*N+max(mu)-1)/t2*disp_iter/1e9;
+        fprintf('it=%g\tgflops=%f (%.1f%%)\t\tmemcpy_in=%f MB/s (%.1f%%)\tmemcpy_out=%f MB/s (%.1f%%)\trun_time=%g\tdiff=%e\n',it,gflops,100*t2/tmp,L*N*8*disp_iter/t1/1024/1024,100*t1/tmp,L*N*8*disp_iter/t3/1024/1024,100*t3/tmp,6500/it*t0,dkp)
+        t1=0; t2=0; t3=0;
         if dkp<1e-10; break; end
     end
 end
 time_Smol = toc;
 fprintf('N = %d\tmu = %d\ttime = %f\n',N,mu(1),time_Smol)
+return
 if gpu; b=gather(b); end
 save(bfile,'b')
 
