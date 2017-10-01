@@ -46,7 +46,6 @@ x=[nan(L,N) reshape(permute(ap,[1 3 2]),L,N)];
 if gpu
     delete(gcp('nocreate'));
     nGPUs = gpuDeviceCount;
-    nGPUs = 1;
     if nGPUs>1
         myCluster = parcluster('local');
         myCluster.NumWorkers = nGPUs;
