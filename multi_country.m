@@ -1,7 +1,7 @@
 % see MATLAB Tutorial on how to run CUDA or PTX Code on GPU:
 % http://www.mathworks.com/help/distcomp/run-cuda-or-ptx-code-on-gpu.html
 clear
-gpu = true; max_iter=100; disp_iter=10;
+gpu = true; max_iter=10000; disp_iter=100;
 N     = 10;      % Number of countries
 gam   = 1;      % Utility-function parameter
 alpha = 0.36;   % Capital share in output
@@ -52,8 +52,9 @@ if gpu
         saveProfile(myCluster);
         parpool('local', nGPUs);
     end
-    if system(sprintf('nvcc -arch=sm_35 -ptx smolyak_kernel.cu -DD=%d -DL=%d -DM=%d -DN=%d -DSMAX=%d -DMU_MAX=%d',D,L/nGPUs,M,N,2^max(mu),max(mu))); error('nvcc failed'); end
-    spmd
+%     if system(sprintf('nvcc -arch=sm_35 -ptx smolyak_kernel.cu -DD=%d -DL=%d -DM=%d -DN=%d -DSMAX=%d -DMU_MAX=%d',D,L/nGPUs,M,N,2^max(mu),max(mu))); error('nvcc failed'); end
+%     spmd
+        labindex = 1;
         gd = gpuDevice;
         fprintf('GPU%d: %s\n', gd.Index, gd.Name)
         kernel = parallel.gpu.CUDAKernel('smolyak_kernel.ptx', 'smolyak_kernel.cu');
@@ -64,7 +65,7 @@ if gpu
         setConstantMemory(kernel,'s',uint8(S-1));
         kpp_=nan(L/nGPUs,N,'gpuArray');
         x=gpuArray(x(1+L*(labindex-1)/nGPUs:L*labindex/nGPUs,:));
-    end
+%     end
 else
     kpp=ones(M,N,J);
 end
@@ -90,7 +91,7 @@ else
     save(binvfile,'B_inv')
 end
 if gpu
-    spmd
+%     spmd
         B_inv=gpuArray(B_inv);
         b=gpuArray(b);
         % Measure the overhead introduced by calling the wait function.
@@ -100,7 +101,7 @@ if gpu
             wait(gd);
             tover = min(toc, tover);
         end
-    end
+%     end
 end
 profile on
 t0=0; % total runtime
@@ -113,7 +114,7 @@ for it=1:max_iter
     if any(kp(:)<0); error('negative capital'); end
     if it==10; bdamp=0.1; end
     if gpu
-        spmd
+%         spmd
 tmp=tic;
             x(:,1:N)=repmat(kp_,J/nGPUs,1);
 t1=t1+toc(tmp);
@@ -124,7 +125,7 @@ t2=t2+toc(tmp)-tover;
 tmp=tic;
             kpp = gather(kpp_);
 t3=t3+toc(tmp);
-        end
+%         end
         t1=t1{1};t2=t2{1};t3=t3{1};
         kpp = vertcat(kpp{:});
 %         max(max(abs(kpp - smolyak(mu,xm,xs,S,gather(vertcat(x{:})))*gather(b{1}))))
@@ -147,10 +148,10 @@ t2=t2+toc(tmp);
     y=bdamp*beta*ucp./uc+(1-bdamp);
     kp=y.*kp;
     if gpu
-        spmd
+%         spmd
             kp_ = gpuArray(kp);
             b = B_inv*kp_;
-        end
+%         end
     else
         b = B_inv*kp;
     end
@@ -192,7 +193,7 @@ ap=reshape(bsxfun(@times,repmat(a.^rho,1,J),e(:)'),T,N,J);
 apn=reshape(permute(ap,[1 3 2]),T*J,N);
 uc=mean(A*a.*k.^alpha+(1-delta)*k-kp,2).^-gam;
 if gpu
-    if system(sprintf('nvcc -arch=sm_35 -ptx smolyak_kernel.cu -DD=%d -DL=%d -DM=%d -DN=%d -DSMAX=%d -DMU_MAX=%d',D,T*J,M,N,2^max(mu),max(mu))); error('nvcc failed'); end
+%     if system(sprintf('nvcc -arch=sm_35 -ptx smolyak_kernel.cu -DD=%d -DL=%d -DM=%d -DN=%d -DSMAX=%d -DMU_MAX=%d',D,T*J,M,N,2^max(mu),max(mu))); error('nvcc failed'); end
     kernel = parallel.gpu.CUDAKernel('smolyak_kernel.ptx', 'smolyak_kernel.cu');
     kernel.ThreadBlockSize = 128;
     kernel.GridSize = ceil(T*J/kernel.ThreadBlockSize(1));
