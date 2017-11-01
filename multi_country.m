@@ -126,8 +126,8 @@ tmp=tic;
             kpp = gather(kpp_);
 t3=t3+toc(tmp);
 %         end
-        t1=t1{1};t2=t2{1};t3=t3{1};
-        kpp = vertcat(kpp{:});
+%         t1=t1{1};t2=t2{1};t3=t3{1};
+%         kpp = vertcat(kpp{:});
 %         max(max(abs(kpp - smolyak(mu,xm,xs,S,gather(vertcat(x{:})))*gather(b{1}))))
         kpp=permute(reshape(kpp,M,J,N),[1 3 2]);
     else
