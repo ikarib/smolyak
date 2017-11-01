@@ -103,7 +103,7 @@ if gpu
         end
 %     end
 end
-profile on
+% profile on
 t0=0; % total runtime
 t1=0; % memcpy_in time
 t2=0; % kernel time
@@ -165,8 +165,8 @@ t2=t2+toc(tmp);
 end
 time_Smol = toc;
 fprintf('N = %d\tmu = %d\ttime = %f\n',N,mu(1),time_Smol)
-profile off
-profile report
+% profile off
+% profile report
 return
 if gpu; b=gather(b); end
 save(bfile,'b')
