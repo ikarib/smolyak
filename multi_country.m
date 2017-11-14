@@ -1,7 +1,7 @@
 % see MATLAB Tutorial on how to run CUDA or PTX Code on GPU:
 % http://www.mathworks.com/help/distcomp/run-cuda-or-ptx-code-on-gpu.html
-clear
-max_iter=100; disp_iter=1;
+clear; profile off
+max_iter=10; disp_iter=1;
 N     = 10;     % Number of countries
 gam   = 1;      % Utility-function parameter
 alpha = 0.36;   % Capital share in output
@@ -44,18 +44,17 @@ ap=reshape(bsxfun(@times,repmat(a.^rho,1,J),e(:)'),M,N,J);
 x=[nan(L,N) reshape(permute(ap,[1 3 2]),L,N)];
 
 gpu = gpuDeviceCount;
-cluster='edith'; % set to 'local' or 'edith'
-if gpu||strcmp(cluster,'edith')
+if isunix % cluster
+    [~,Cfg]=system('scontrol show node n28 | grep CfgTRES= | tr "," "\n" | grep gres/gpu | cut -d = -f 2');
+    [~,Alloc]=system('scontrol show node n28 | grep AllocTRES= | tr "," "\n" | grep gres/gpu | cut -d = -f 2');
+    if isempty(Alloc); Alloc='0'; end
+    gpu = str2double(Cfg)-str2double(Alloc);
+    setenv('MATLAB_WORKER_ARGS',sprintf('--gres=gpu:%d',gpu))
+end
+if gpu
     delete(gcp('nocreate'));
-    if strcmp(cluster,'edith');
-        [~,Cfg]=system('scontrol show node n28 | grep CfgTRES= | tr "," "\n" | grep gres/gpu | cut -d = -f 2');
-        [~,Alloc]=system('scontrol show node n28 | grep AllocTRES= | tr "," "\n" | grep gres/gpu | cut -d = -f 2');
-        if isempty(Alloc); Alloc='0'; end
-        gpu = str2double(Cfg)-str2double(Alloc);
-        setenv('MATLAB_WORKER_ARGS',sprintf('--gres=gpu:%d',gpu))
-    end
     if gpu>1
-        c = parcluster(cluster);
+        c = parcluster;
         c.NumWorkers = gpu;
         p = parpool(c);
     end
@@ -115,9 +114,12 @@ t1=0; % memcpy_in time
 t2=0; % kernel time
 t3=0; % memcpy_out time
 t4=0; % host time
+t5=0; % host time
+t6=0; % host time
 fprintf('Iter\tGFLOPS\tMemcpy_IN, MB/s\tMemcpy_OUT, MB/s\tRuntime\tDiff\n')
 profile on
 tic
+%%
 for it=1:max_iter
     if any(kp(:)<0); error('negative capital'); end
     if it==10; bdamp=0.1; end
@@ -141,7 +143,7 @@ tmp=tic;
 %         kpp=gather(kpp);
 %         kpp = vertcat(kpp{:});
 %         max(max(abs(kpp - smolyak(mu,xm,xs,S,gather(vertcat(x{:})))*gather(b{1}))))
-        kpp=permute(reshape(kpp,M,J,N),[1 3 2]);
+        kpp=gather(permute(reshape(kpp,M,J,N),[1 3 2]));
 t4=t4+toc(tmp);
     else
         kpp=nan(M,N,J);
@@ -151,6 +153,7 @@ tmp=tic;
         end
 t2=t2+toc(tmp);
     end
+tmp=tic;
     ucp=repmat(mean(bsxfun(@plus,bsxfun(@times,A*kp.^alpha,ap)-kpp,(1-delta)*kp),2).^-gam,1,N,1);
 %     ucp=repmat(mean(A*kp.^alpha.*ap-kpp+(1-delta)*kp,2).^-gam,1,N,1); % requires R2016b
     r=1-delta+bsxfun(@times,(A*alpha)*kp.^(alpha-1),ap);
@@ -160,6 +163,8 @@ t2=t2+toc(tmp);
     y=bsxfun(@rdivide,ucp,uc/(bdamp*beta))+(1-bdamp);
 %     y=bdamp*beta*ucp./uc+(1-bdamp); % requires R2016b
     kp=y.*kp;
+t5=t5+toc(tmp);
+tmp=tic;
     if gpu
         spmd
             kp_ = gpuArray(kp);
@@ -168,11 +173,12 @@ t2=t2+toc(tmp);
     else
         b = B_inv*kp;
     end
+t6=t6+toc(tmp);
     if ~mod(it,disp_iter)
         dkp=mean(abs(1-y(:)));
         tmp=t0; t0=toc; tmp=t0-tmp; gflops=L*M*(2*N+max(mu)-1)/t2*disp_iter/1e9;
-        fprintf('%g\t%.1f (%.1f%%)\t%.1f (%.1f%%)\t%.1f (%.1f%%)\t%.1f%%\t%.1f\t%e\n',it,gflops,100*t2/tmp,M*N*8*disp_iter/t1/1024/1024,100*t1/tmp,L*N*8*disp_iter/t3/1024/1024,100*t3/tmp,100*t4/tmp,6500/it*t0,dkp)
-        t1=0; t2=0; t3=0; t4=0;
+        fprintf('%g\t%.1f (%.1f%%)\t%.1f (%.1f%%)\t%.1f (%.1f%%)\t%.1f%%\t%.1f%%\t%.1f%%\t%.1f%%\t%.1f\t%e\n',it,gflops,100*t2/tmp,M*N*8*disp_iter/t1/1024/1024,100*t1/tmp,L*N*8*disp_iter/t3/1024/1024,100*t3/tmp,100*t4/tmp,100*t5/tmp,100*t6/tmp,100*(t1+t2+t3+t4+t5+t6)/tmp,6500/it*t0,dkp)
+        t1=0; t2=0; t3=0; t4=0; t5=0; t6=0;
         if dkp<1e-10; break; end
     end
 end
