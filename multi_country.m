@@ -1,6 +1,6 @@
 % see MATLAB Tutorial on how to run CUDA or PTX Code on GPU:
 % http://www.mathworks.com/help/distcomp/run-cuda-or-ptx-code-on-gpu.html
-clear; profile off
+clear%; profile off
 max_iter=10; disp_iter=1;
 N     = 10;     % Number of countries
 gam   = 1;      % Utility-function parameter
@@ -44,13 +44,13 @@ ap=reshape(bsxfun(@times,repmat(a.^rho,1,J),e(:)'),M,N,J);
 x=[nan(L,N) reshape(permute(ap,[1 3 2]),L,N)];
 
 gpu = gpuDeviceCount;
-if isunix % cluster
-    [~,Cfg]=system('scontrol show node n28 | grep CfgTRES= | tr "," "\n" | grep gres/gpu | cut -d = -f 2');
-    [~,Alloc]=system('scontrol show node n28 | grep AllocTRES= | tr "," "\n" | grep gres/gpu | cut -d = -f 2');
-    if isempty(Alloc); Alloc='0'; end
-    gpu = str2double(Cfg)-str2double(Alloc);
-    setenv('MATLAB_WORKER_ARGS',sprintf('--gres=gpu:%d',gpu))
-end
+% if isunix % cluster
+%     [~,Cfg]=system('scontrol show node n28 | grep CfgTRES= | tr "," "\n" | grep gres/gpu | cut -d = -f 2');
+%     [~,Alloc]=system('scontrol show node n28 | grep AllocTRES= | tr "," "\n" | grep gres/gpu | cut -d = -f 2');
+%     if isempty(Alloc); Alloc='0'; end
+%     gpu = str2double(Cfg)-str2double(Alloc);
+%     setenv('MATLAB_WORKER_ARGS',sprintf('--gres=gpu:%d',gpu))
+% end
 if gpu
     delete(gcp('nocreate'));
     if gpu>1
@@ -58,7 +58,7 @@ if gpu
         c.NumWorkers = gpu;
         p = parpool(c);
     end
-%     if system(sprintf('nvcc -arch=sm_35 -ptx smolyak_kernel.cu -DD=%d -DL=%d -DM=%d -DN=%d -DSMAX=%d -DMU_MAX=%d',D,L/gpu,M,N,2^max(mu),max(mu))); error('nvcc failed'); end
+%    if system(sprintf('nvcc -arch=sm_35 -ptx smolyak_kernel.cu -DD=%d -DL=%d -DM=%d -DN=%d -DSMAX=%d -DMU_MAX=%d',D,L/gpu,M,N,2^max(mu),max(mu))); error('nvcc failed'); end
     X=distributed(x')';
     spmd
         gd = gpuDevice;
@@ -117,7 +117,7 @@ t4=0; % host time
 t5=0; % host time
 t6=0; % host time
 fprintf('Iter\tGFLOPS\tMemcpy_IN, MB/s\tMemcpy_OUT, MB/s\tRuntime\tDiff\n')
-profile on
+%profile on
 tic
 %%
 for it=1:max_iter
@@ -183,9 +183,10 @@ t6=t6+toc(tmp);
     end
 end
 time_Smol = toc;
-profile off
+%profile off
 fprintf('N = %d\tmu = %d\ttime = %f\n',N,mu(1),time_Smol)
-profile report
+%profile report
+exit
 if gpu>1
     delete(gcp('nocreate'))
 end
