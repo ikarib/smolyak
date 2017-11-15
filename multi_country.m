@@ -44,21 +44,20 @@ ap=reshape(bsxfun(@times,repmat(a.^rho,1,J),e(:)'),M,N,J);
 x=[nan(L,N) reshape(permute(ap,[1 3 2]),L,N)];
 
 gpu = gpuDeviceCount;
-% if isunix % cluster
-%     [~,Cfg]=system('scontrol show node n28 | grep CfgTRES= | tr "," "\n" | grep gres/gpu | cut -d = -f 2');
-%     [~,Alloc]=system('scontrol show node n28 | grep AllocTRES= | tr "," "\n" | grep gres/gpu | cut -d = -f 2');
-%     if isempty(Alloc); Alloc='0'; end
-%     gpu = str2double(Cfg)-str2double(Alloc);
-%     setenv('MATLAB_WORKER_ARGS',sprintf('--gres=gpu:%d',gpu))
-% end
+if isunix % cluster
+    [~,Cfg]=system('scontrol show node n28 | grep CfgTRES= | tr "," "\n" | grep gres/gpu | cut -d = -f 2');
+    [~,Alloc]=system('scontrol show node n28 | grep AllocTRES= | tr "," "\n" | grep gres/gpu | cut -d = -f 2');
+    if isempty(Alloc); Alloc='0'; end
+    gpu = str2double(Cfg)-str2double(Alloc)
+    setenv('MATLAB_WORKER_ARGS',sprintf('--gres=gpu:%d',gpu))
+end
 if gpu
     delete(gcp('nocreate'));
     if gpu>1
-        c = parcluster;
-        c.NumWorkers = gpu;
-        p = parpool(c);
+        p = parpool('edith',gpu);
     end
-%    if system(sprintf('nvcc -arch=sm_35 -ptx smolyak_kernel.cu -DD=%d -DL=%d -DM=%d -DN=%d -DSMAX=%d -DMU_MAX=%d',D,L/gpu,M,N,2^max(mu),max(mu))); error('nvcc failed'); end
+%     if system(sprintf('nvcc -arch=sm_35 -ptx smolyak_kernel.cu -DD=%d -DL=%d -DM=%d -DN=%d -DSMAX=%d -DMU_MAX=%d',D,L/gpu,M,N,2^max(mu),max(mu))); error('nvcc failed'); end
+    fprintf('nvcc -arch=sm_35 -ptx smolyak_kernel.cu -DD=%d -DL=%d -DM=%d -DN=%d -DSMAX=%d -DMU_MAX=%d\n',D,L/gpu,M,N,2^max(mu),max(mu));
     X=distributed(x')';
     spmd
         gd = gpuDevice;
