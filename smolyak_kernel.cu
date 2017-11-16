@@ -1,10 +1,10 @@
 // parameters needed for smolyak_kernel.cu: D, L, M, N, SMAX, MU_MAX
 // INPUTS:
-// x - matrix of size L x D
+// x - matrix of size D x L
 // s - matrix of size M x MU_MAX in constant memory
 // c - matrix of size M x N
 // OUTPUT:
-// y - matrix of size L x N
+// y - matrix of size N x L
 
 __constant__ double xm[D], xs[D];
 
@@ -19,11 +19,11 @@ __constant__ unsigned char s[MU_MAX][M];
 //#endif
 
 #ifdef CONST_S
-__global__ void smolyak(double const * __restrict__ x, double *y, double const * __restrict__ c) {
+__global__ void smolyak(double const * __restrict__ x, double *y, int L, double const * __restrict__ c) {
 #elif defined CONST_C
-__global__ void smolyak(double const * __restrict__ x, double *y) {
+__global__ void smolyak(double const * __restrict__ x, double *y, int L) {
 #else
-__global__ void smolyak(double const * __restrict__ x, double *y, double const * __restrict__ c, unsigned char const * __restrict__ s) {
+__global__ void smolyak(double const * __restrict__ x, double *y, int L, double const * __restrict__ c, unsigned char const * __restrict__ s) {
 #endif
 
 	// Two options for thread-private storage p:
@@ -34,35 +34,35 @@ __global__ void smolyak(double const * __restrict__ x, double *y, double const *
 	int i, j, t = threadIdx.x + blockIdx.x * blockDim.x;
 	double b, yt[N] = {0.0};
 
-//	while (t<L) {
-	if (t < L) {
-		p[0] = 1.0;
-		for (i = 0; i < D; i++) {
-			double *pi = &p[1+i*SMAX];
-			pi[0] = b = (x[t+i*L]-xm[i])/xs[i];
-			pi[1] = 2*b*b-1;
-			for (j = 2; j < SMAX; j++)
-				pi[j] = 2 * b * pi[j-1] - pi[j-2];
-		}
-
-		for (j = 0; j < M; j++) {
-			b = 1.0;
-			for (i = 0; i < MU_MAX; i++)
-#ifdef CONST_S
-				b *= p[s[i][j]];
-#else
-				b *= p[s[j+i*M]];
-#endif
-			for (i = 0; i < N; i++)
-#ifdef CONST_C
-				yt[i] += b * c[i][j];
-#else
-				yt[i] += b * c[j+i*M];
-#endif
-		}
-		for (i = 0; i < N; i++)
-			y[t+i*L] = yt[i];
-//		t += blockDim.x * gridDim.x;
+//while (t<L) {
+	if (t >= L) return;
+	p[0] = 1.0;
+	for (i = 0; i < D; i++) {
+		double *pi = &p[1+i*SMAX];
+		pi[0] = b = (x[i+t*D]-xm[i])/xs[i];
+		pi[1] = 2*b*b-1;
+		for (j = 2; j < SMAX; j++)
+			pi[j] = 2 * b * pi[j-1] - pi[j-2];
 	}
+
+	for (j = 0; j < M; j++) {
+		b = 1.0;
+		for (i = 0; i < MU_MAX; i++)
+#ifdef CONST_S
+			b *= p[s[i][j]];
+#else
+			b *= p[s[j+i*M]];
+#endif
+		for (i = 0; i < N; i++)
+#ifdef CONST_C
+			yt[i] += b * c[i][j];
+#else
+			yt[i] += b * c[j+i*M];
+#endif
+	}
+	for (i = 0; i < N; i++)
+		y[i+t*N] = yt[i];
+//	t += blockDim.x * gridDim.x;
+//}
 }
 

@@ -41,7 +41,7 @@ L=M*J;
 
 k=X(:,1:N); a=X(:,N+1:2*N); clear X
 ap=reshape(bsxfun(@times,repmat(a.^rho,1,J),e(:)'),M,N,J);
-x=[nan(L,N) reshape(permute(ap,[1 3 2]),L,N)];
+x=[nan(N,L); reshape(permute(ap,[2 1 3]),N,L)];
 
 gpu = gpuDeviceCount;
 if isunix % cluster
@@ -58,7 +58,7 @@ if gpu
     end
 %     if system(sprintf('nvcc -arch=sm_35 -ptx smolyak_kernel.cu -DD=%d -DL=%d -DM=%d -DN=%d -DSMAX=%d -DMU_MAX=%d',D,L/gpu,M,N,2^max(mu),max(mu))); error('nvcc failed'); end
     fprintf('nvcc -arch=sm_35 -ptx smolyak_kernel.cu -DD=%d -DL=%d -DM=%d -DN=%d -DSMAX=%d -DMU_MAX=%d\n',D,L/gpu,M,N,2^max(mu),max(mu));
-    X=distributed(x')';
+    X=distributed(x);
     spmd
         gd = gpuDevice;
         fprintf('GPU%d: %s\n', gd.Index, gd.Name)
@@ -68,7 +68,7 @@ if gpu
         setConstantMemory(kernel,'xm',xm);
         setConstantMemory(kernel,'xs',xs);
         setConstantMemory(kernel,'s',uint8(S-1));
-        kpp_=nan(L/gpu,N,'gpuArray');
+        kpp_=nan(N,L/gpu,'gpuArray');
         x=gpuArray(getLocalPart(X));
     end
 else
@@ -88,8 +88,9 @@ kp=B*b;
 bdamp=0.05;
 binvfile=sprintf('B_inv_N=%d_mu=%d.mat',N,max(mu));
 if exist(binvfile,'file')
-    fprintf('loading %s\n',binvfile)
+    fprintf('loading %s ... ',binvfile)
     load(binvfile)
+    fprintf('done\n')
 else
     B_inv=inv(B);
     save(binvfile,'B_inv')
@@ -125,7 +126,7 @@ for it=1:max_iter
     if gpu
         spmd
 tmp=tic;
-            x(:,1:N)=repmat(kp_,J/gpu,1);
+            x(1:N,:)=repmat(kp_',1,J/gpu);
 t1=t1+toc(tmp);
 tmp=tic;
             kpp_ = feval(kernel, x, kpp_, b);
@@ -133,16 +134,16 @@ tmp=tic;
 t2=t2+toc(tmp)-tover;
 tmp=tic;
 %             kpp = gather(kpp_);
-            kpp = codistributed.build(gather(kpp_),codistributor1d(1,repmat(L/gpu,1,gpu),[L N]));
+            kpp = codistributed.build(gather(kpp_),codistributor1d(2,repmat(L/gpu,1,gpu),[N L]));
             wait(gd);
 t3=t3+toc(tmp);
         end
 tmp=tic;
         t1=t1{1};t2=t2{1};t3=t3{1};
 %         kpp=gather(kpp);
-%         kpp = vertcat(kpp{:});
-%         max(max(abs(kpp - smolyak(mu,xm,xs,S,gather(vertcat(x{:})))*gather(b{1}))))
-        kpp=gather(permute(reshape(kpp,M,J,N),[1 3 2]));
+%         kpp = horzcat(kpp{:});
+%         max(max(abs(kpp - smolyak(mu,xm,xs,S,gather(horzcat(x{:})))*gather(b{1}))))
+        kpp=gather(permute(reshape(kpp,N,M,J),[2 1 3]));
 t4=t4+toc(tmp);
     else
         kpp=nan(M,N,J);
@@ -198,21 +199,20 @@ tic
 T_test=10200; discard=200; Omega=chol(Sigma);
 if gssa
     load Smolyak_Anisotropic_JMMV_2014/aT20200N10
-    T=10000; x = [ones(T_test,N) a20200(T+1:T+T_test,1:N); 1 nan(1,2*N-1)];
+    T=10000; x = [[ones(N,T_test); a20200(T+1:T+T_test,1:N)'] [1; nan(2*N-1,1)]];
 else
-    x=ones(T_test+1,2*N); rng(1); E=exp(randn(T_test,N)*Omega);
+    x=ones(2*N,T_test+1); rng(1); E=exp(randn(T_test,N)*Omega);
 end
 for t=1:T_test
-    x(t+1,1:N)=smolyak(mu,xm,xs,S,x(t,:))*b;
+    x(1:N,t+1)=smolyak(mu,xm,xs,S,x(:,t))*b;
     if ~gssa
-        x(t+1,N+1:2*N)=x(t,N+1:2*N).^rho.*E(t,:);
+        x(N+1:2*N,t+1)=x(N+1:2*N,t).^rho.*E(t,:)';
     end
 end
-x=x(1+discard:end,:);
+x=x(:,1+discard:end);
 T=T_test-discard;
-k=x(1:T,1:N); kp=x(2:T+1,1:N); a=x(1:T,N+1:2*N);
+k=x(1:N,1:T); kp=x(1:N,2:T+1); a=x(N+1:2*N,1:T);
 ap=reshape(bsxfun(@times,repmat(a.^rho,1,J),e(:)'),T,N,J);
-apn=reshape(permute(ap,[1 3 2]),T*J,N);
 uc=mean(A*a.*k.^alpha+(1-delta)*k-kp,2).^-gam;
 if gpu
 %     if system(sprintf('nvcc -arch=sm_35 -ptx smolyak_kernel.cu -DD=%d -DL=%d -DM=%d -DN=%d -DSMAX=%d -DMU_MAX=%d',D,T*J,M,N,2^max(mu),max(mu))); error('nvcc failed'); end
@@ -222,10 +222,10 @@ if gpu
     setConstantMemory(kernel,'xm',xm);
     setConstantMemory(kernel,'xs',xs);
     setConstantMemory(kernel,'s',uint8(S-1));
-    x=[repmat(kp,J,1) apn];
+    x=[repmat(kp',1,J); reshape(permute(ap,[2 1 3]),N,T*J)];
     kpp=nan(T*J,N,'gpuArray');
     kpp = gather(feval(kernel, x, kpp, b));
-    kpp=permute(reshape(kpp,T,J,N),[1 3 2]);
+    kpp=permute(reshape(kpp,N,T,J),[2 1 3]);
 else
     kpp=nan(T,N,J);
     for j=1:J
