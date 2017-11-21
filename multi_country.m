@@ -52,9 +52,14 @@ if isunix % cluster
     setenv('MATLAB_WORKER_ARGS',sprintf('--gres=gpu:%d',gpu))
 end
 if gpu
-    delete(gcp('nocreate'));
     if gpu>1
-        p = parpool('edith',gpu);
+        p = gcp('nocreate'); % If no pool, do not create new one.
+        if isempty(p)
+            parpool(gpu)
+        elseif p.NumWorkers ~= gpu
+            delete(p)
+            parpool(gpu)
+        end
     end
 %     if system(sprintf('nvcc -arch=sm_35 -ptx smolyak_kernel.cu -DD=%d -DM=%d -DN=%d -DSMAX=%d -DMU_MAX=%d',D,M,N,2^max(mu),max(mu))); error('nvcc failed'); end
     fprintf('nvcc -arch=sm_35 -ptx smolyak_kernel.cu -DD=%d -DM=%d -DN=%d -DSMAX=%d -DMU_MAX=%d\n',D,M,N,2^max(mu),max(mu));
@@ -115,7 +120,7 @@ t3=0; % memcpy_out time
 t4=0; % host time
 t5=0; % host time
 t6=0; % host time
-fprintf('Iter\tGFLOPS\tMemcpy_IN, MB/s\tMemcpy_OUT, MB/s\tRuntime\tDiff\n')
+fprintf('Iter\tGFLOPS\tMemcpy_IN, MB/s\tMemcpy_OUT, MB/s\tcollect\tcpu\tgemm\tRuntime\tDiff\n')
 %profile on
 tic
 %%
@@ -184,9 +189,10 @@ time_Smol = toc;
 fprintf('N = %d\tmu = %d\ttime = %f\n',N,mu(1),time_Smol)
 %profile report
 if gpu>1
-    delete(gcp('nocreate'))
+    spmd; b=gather(b); end
+else
+    b=gather(b);
 end
-if gpu; b=gather(b); end
 save(bfile,'b')
 
 %% compute Euler equation errors
