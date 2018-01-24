@@ -43,26 +43,20 @@ k=X(:,1:N); a=X(:,N+1:2*N); clear X
 ap=reshape(bsxfun(@times,repmat(a.^rho,1,J),e(:)'),M,N,J);
 x=[nan(N,L); reshape(permute(ap,[2 1 3]),N,L)];
 
-gpu = gpuDeviceCount;
-if isunix % cluster
-    [~,Cfg]=system('scontrol show node n28 | grep CfgTRES= | tr "," "\n" | grep gres/gpu | cut -d = -f 2');
-    [~,Alloc]=system('scontrol show node n28 | grep AllocTRES= | tr "," "\n" | grep gres/gpu | cut -d = -f 2');
-    if isempty(Alloc); Alloc='0'; end
-    gpu = str2double(Cfg)-str2double(Alloc)
-    setenv('MATLAB_WORKER_ARGS',sprintf('--gres=gpu:%d',gpu))
-end
+%gpu = gpuDeviceCount;
+gpu = 4;
 if gpu
-    if gpu>1
-        p = gcp('nocreate'); % If no pool, do not create new one.
-        if isempty(p)
-            parpool(gpu)
-        elseif p.NumWorkers ~= gpu
-            delete(p)
-            parpool(gpu)
-        end
+    setenv('MATLAB_WORKER_ARGS',sprintf('--gres=gpu:%d',gpu))
+    p = gcp('nocreate'); % If no pool, do not create new one.
+    if isempty(p)
+        parpool(gpu)
+    elseif p.NumWorkers ~= gpu
+        delete(p)
+        parpool(gpu)
     end
-%     if system(sprintf('nvcc -arch=sm_35 -ptx smolyak_kernel.cu -DD=%d -DM=%d -DN=%d -DSMAX=%d -DMU_MAX=%d',D,M,N,2^max(mu),max(mu))); error('nvcc failed'); end
-    fprintf('nvcc -arch=sm_35 -ptx smolyak_kernel.cu -DD=%d -DM=%d -DN=%d -DSMAX=%d -DMU_MAX=%d\n',D,M,N,2^max(mu),max(mu));
+    cmd = sprintf('nvcc -arch=sm_35 -ptx smolyak_kernel.cu -DD=%d -DM=%d -DN=%d -DSMAX=%d -DMU_MAX=%d',D,M,N,2^max(mu),max(mu));
+    disp(cmd);
+    if system(cmd); error('nvcc failed'); end
     spmd
         gd = gpuDevice;
         fprintf('GPU%d: %s\n', gd.Index, gd.Name)
@@ -144,8 +138,9 @@ t3=t3+toc(tmp);
         end
 tmp=tic;
         t1=t1{1};t2=t2{1};t3=t3{1};
-%        max(max(abs(kpp' - smolyak(mu,xm,xs,S,[X{:}]')*gather(b{1}))))
+%         max(max(abs(kpp' - smolyak(mu,xm,xs,S,[X{:}]')*gather(b{1}))))
         kpp=permute(reshape([kpp{:}],N,M,J),[2 1 3]);
+%         kpp=permute(reshape(kpp,N,M,J),[2 1 3]);
 t4=t4+toc(tmp);
     else
         kpp=nan(M,N,J);
@@ -189,7 +184,9 @@ time_Smol = toc;
 fprintf('N = %d\tmu = %d\ttime = %f\n',N,mu(1),time_Smol)
 %profile report
 if gpu>1
-    spmd; b=gather(b); end
+    spmd
+        b=gather(b);
+    end
 else
     b=gather(b);
 end
