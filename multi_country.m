@@ -43,8 +43,7 @@ k=X(:,1:N); a=X(:,N+1:2*N); clear X
 ap=reshape(bsxfun(@times,repmat(a.^rho,1,J),e(:)'),M,N,J);
 x=[nan(N,L); reshape(permute(ap,[2 1 3]),N,L)];
 
-%gpu = gpuDeviceCount;
-gpu = 4;
+gpu = gpuDeviceCount;
 if gpu
     setenv('MATLAB_WORKER_ARGS',sprintf('--gres=gpu:%d',gpu))
     p = gcp('nocreate'); % If no pool, do not create new one.
@@ -184,9 +183,7 @@ time_Smol = toc;
 fprintf('N = %d\tmu = %d\ttime = %f\n',N,mu(1),time_Smol)
 %profile report
 if gpu>1
-    spmd
-        b=gather(b);
-    end
+    b{1}=b;
 else
     b=gather(b);
 end
