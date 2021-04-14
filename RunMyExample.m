@@ -3,10 +3,9 @@ clear; clc; close all
 
 % Suppose we want to approximate the following 2-D function 
 % The Rosenbrock banana function:
-y = @(x) 100*(x(:,2)-x(:,1).^2).^2+(1-x(:,1)).^2;
-
-% specify domain: mean xm=(max+min)/2, and spread xs=(max-min)/2
-xm=0; xs=1;
+z    = @(x,y)  100*(y-x.^2).^2 + (1-x).^2;
+dzdx = @(x,y) -400*(y-x.^2).*x - 2*(1-x);
+dzdy = @(x,y)  200*(y-x.^2);
 
 % set approximation levels (in first and second dimensions):
 mu=[2 1];
@@ -17,26 +16,33 @@ mu=[2 1];
 
 % First we need to construct Smolyak indices S for given mu
 % and evaluate Chebyshev polynomial basis function B at extrema grid points X
-[B,X,S] = smolyak(mu,xm,xs);
+S = smolyak(mu);
 
 % Construct the test grid scaled according to xm and xs 
 % at which we will approximate our true function y(x)
-[x1,x2] = meshgrid(-1:.05:1, -1:.05:1);
-x=bsxfun(@plus,bsxfun(@times,[x1(:) x2(:)],xs),xm);
-y_true=y(x);
+[x,y] = meshgrid(-1:.05:1, -1:.05:1);
+z_true=z(x,y);
+dzdx_true=dzdx(x,y);
+dzdy_true=dzdy(x,y);
 
 % Plot the true function
-x1=reshape(x(:,1),size(x1));
-x2=reshape(x(:,2),size(x2));
-y_true = reshape(y_true,size(x1));
-subplot(1,2,1), surf(x1,x2,y_true),title('True function')
+subplot(2,3,1), surf(x,y,z_true),title('True function, z(x,y)')
+subplot(2,3,2), surf(x,y,dzdx_true),title('True derivative, dz/dx')
+subplot(2,3,3), surf(x,y,dzdy_true),title('True derivative, dz/dy')
 
 % Estimate coefficients c
-c = B\y(X);
+S.Values = z(S.GridVectors(:,1),S.GridVectors(:,2));
 
 % Evaluate Smolyak polynomial at test grid x using estimated coefficients c
-y_fit=smolyak(mu,xm,xs,S,x)*c;
+xy=[x(:) y(:)];
+z_fit = S(xy);
+dzdx_fit = S(xy,1);
+dzdy_fit = S(xy,2);
 
 % Calculate and plot approximation errors
-y_err = y_fit-y_true(:);
-subplot(1,2,2), scatter3(x1(:),x2(:),y_err,'.'),title('Errors in Smolyak interpolation')
+z_err = reshape(z_fit,size(z_true))-z_true;
+dzdx_err = reshape(dzdx_fit,size(dzdx_true))-dzdx_true;
+dzdy_err = reshape(dzdy_fit,size(dzdy_true))-dzdy_true;
+subplot(2,3,4), surf(x,y,z_err),title('Errors in Smolyak interpolation of z(x,y)')
+subplot(2,3,5), surf(x,y,dzdx_err),title('Errors in Smolyak interpolation of dz/dx')
+subplot(2,3,6), surf(x,y,dzdy_err),title('Errors in Smolyak interpolation of dz/dy')
